@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Inventario de Carne - Control de Kilos y Costos</title>
+    <!-- Tailwind CSS para el diseño responsive -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Tesseract.js para OCR por cámara -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <!-- SheetJS para exportar a Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            user-select: none;
+        }
+        /* Ocultar scrollbar pero mantener funcionalidad */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* Estilos de pulso para captura */
+        @keyframes scan-line {
+            0% { top: 10%; }
+            50% { top: 85%; }
+            100% { top: 10%; }
+        }
+        .scan-animation {
+            position: absolute;
+            left: 5%;
+            right: 5%;
+            height: 3px;
+            background: #22c55e;
+            box-shadow: 0 0 12px #22c55e;
+            animation: scan-line 2.5s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col pb-20">
+
+    <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-30 shadow-md">
+        <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="p-2 bg-red-600 rounded-lg text-white font-bold flex items-center justify-center">
+                    <i data-lucide="beef" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight text-white">Carnicería & Bodega</h1>
+                    <p class="text-xs text-slate-400">Control de Pesos y Costos (Vacuno)</p>
+                </div>
+            </div>
+            <button onclick="cambiarPestana('resumen')" class="relative p-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-200 transition">
+                <i data-lucide="calculator" class="w-6 h-6"></i>
+                <span id="badge-total-cajas" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center border-2 border-slate-800">0</span>
+            </button>
+        </div>
+        
+        <!-- Pestañas de navegación -->
+        <nav class="flex border-t border-slate-700/60 bg-slate-800/80 text-sm font-medium text-center">
+            <button id="nav-escaner" onclick="cambiarPestana('escaner')" class="flex-1 py-2.5 border-b-2 border-red-500 text-red-400 font-bold flex items-center justify-center gap-2">
+                <i data-lucide="qr-code" class="w-4 h-4"></i>
+                Escáner / Peso
+            </button>
+            <button id="nav-resumen" onclick="cambiarPestana('resumen')" class="flex-1 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center justify-center gap-2">
+                <i data-lucide="file-text" class="w-4 h-4"></i>
+                Resumen Costos
+            </button>
+        </nav>
+    </header>
+
+    <main class="max-w-md mx-auto w-full p-4 flex-1 flex flex-col gap-4">
+
+        <!-- SECCIÓN 1: ESCÁNER / INGRESO DE PESO -->
+        <div id="view-escaner" class="flex flex-col gap-4">
+
+            <!-- Selector de Corte de Carne Active -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-3 shadow-lg">
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                    <span>Corte Seleccionado (Vacuno)</span>
+                    <button onclick="abrirModalNuevoCorte()" class="text-red-400 hover:text-red-300 text-xs flex items-center gap-1 font-normal">
+                        <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Agregar Otro
+                    </button>
+                </label>
+                <div class="flex gap-2">
+                    <select id="select-corte" onchange="actualizarCorteActivo()" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-lg font-bold text-slate-100 focus:outline-none focus:border-red-500">
+                        <!-- Opciones cargadas por JS -->
+                    </select>
+                </div>
+            </div>
+
+            <!-- Camara / Visor OCR -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-3 shadow-lg flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2 text-sm font-semibold text-slate-300">
+                        <i data-lucide="camera" class="w-4 h-4 text-red-400"></i> Escáner de Etiqueta
+                    </div>
+                    <button id="btn-toggle-camara" onclick="toggleCamara()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1 transition">
+                        <i data-lucide="video" class="w-3.5 h-3.5"></i> <span id="text-btn-camara">Iniciar Cámara</span>
+                    </button>
+                </div>
+
+                <!-- Visor de la cámara -->
+                <div id="contenedor-visor" class="relative w-full h-52 bg-slate-950 rounded-lg overflow-hidden border border-slate-700 hidden flex items-center justify-center">
+                    <video id="video-stream" class="w-full h-full object-cover" playsinline muted></video>
+                    <canvas id="canvas-ocr" class="hidden"></canvas>
+
+                    <!-- Guias para enfocar el número de la etiqueta -->
+                    <div class="absolute inset-0 border-2 border-dashed border-red-500/50 m-6 rounded-lg pointer-events-none flex flex-col justify-between p-2">
+                        <span class="text-[10px] text-red-400 font-bold bg-slate-950/80 px-2 py-0.5 rounded w-max">Apunta a los Kg Netos</span>
+                        <div class="scan-animation"></div>
+                        <span class="text-[10px] text-slate-300 bg-slate-950/80 px-2 py-0.5 rounded self-end">Ej: 18.450 / 22,30</span>
+                    </div>
+
+                    <!-- Overlay de procesando -->
+                    <div id="ocr-loader" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 hidden">
+                        <div class="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                        <p class="text-xs text-slate-200 font-semibold">Analizando etiqueta...</p>
+                    </div>
+                </div>
+
+                <button id="btn-capturar-ocr" onclick="capturarYAnalizarEtiqueta()" class="w-full bg-red-600 hover:bg-red-500 text-white py-2.5 rounded-lg font-bold flex items-center justify-center gap-2 transition hidden">
+                    <i data-lucide="scan" class="w-5 h-5"></i> Escanear Kilos Ahora
+                </button>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg flex flex-col gap-3">
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Ingreso / Confirmación de Peso (KG)
+                </label>
+                
+                <div class="flex gap-2 items-center">
+                    <div class="relative flex-1">
+                        <input type="number" id="input-kilos" step="0.001" placeholder="0.000" class="w-full bg-slate-900 border-2 border-slate-600 focus:border-green-500 rounded-lg p-3 text-3xl font-extrabold text-white text-right focus:outline-none pr-12">
+                        <span class="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-lg">KG</span>
+                    </div>
+                    <button onclick="agregarCajaDesdeInput()" class="bg-green-600 hover:bg-green-500 active:scale-95 text-white font-bold p-3.5 rounded-lg flex items-center justify-center transition shadow-lg shadow-green-900/30">
+                        <i data-lucide="plus" class="w-8 h-8"></i>
+                    </button>
+                </div>
+
+                <!-- Botones rápidos de ajuste o corrección rápida -->
+                <div class="grid grid-cols-4 gap-2 pt-1">
+                    <button onclick="ajustarInput(10)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 py-1.5 rounded font-medium text-xs">+10 kg</button>
+                    <button onclick="ajustarInput(1)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 py-1.5 rounded font-medium text-xs">+1 kg</button>
+                    <button onclick="ajustarInput(0.1)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 py-1.5 rounded font-medium text-xs">+100 g</button>
+                    <button onclick="limpiarInput()" class="bg-slate-700 hover:bg-slate-600 text-red-400 py-1.5 rounded font-medium text-xs">Borrar</button>
+                </div>
+            </div>
+
+            <!-- Resumen Rápido del Corte Activo -->
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                    <h3 id="corte-activo-titulo" class="font-bold text-slate-200">Lomo Vetado</h3>
+                    <p class="text-xs text-slate-400">Total acumulado para este corte</p>
+                </div>
+                <div class="text-right">
+                    <span id="corte-activo-kilos" class="text-2xl font-black text-green-400 block">0.00 kg</span>
+                    <span id="corte-activo-cajas" class="text-xs font-semibold text-slate-400">0 Cajas registrad.</span>
+                </div>
+            </div>
+
+            <!-- Historial Reciente de Cajas del Corte Activo -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Cajas de este corte</h4>
+                    <button onclick="vaciarCajasDeCorteActivo()" class="text-xs text-red-400 hover:underline">Vaciar Corte</button>
+                </div>
+                
+                <div id="lista-cajas-corte" class="flex flex-col gap-2 max-h-48 overflow-y-auto no-scrollbar">
+                    <!-- Registros de cajas agregadas -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- SECCIÓN 2: RESUMEN DE COSTOS & INVENTARIO GENERAL -->
+        <div id="view-resumen" class="flex flex-col gap-4 hidden">
+
+            <!-- Card Totales Globales -->
+            <div class="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-xl p-4 shadow-xl">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Gran Total de Inventario</h2>
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-700/60">
+                        <span class="text-xs text-slate-400 block">Cajas Totales</span>
+                        <span id="total-global-cajas" class="text-2xl font-black text-white">0</span>
+                    </div>
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-700/60">
+                        <span class="text-xs text-slate-400 block">Total Kilos</span>
+                        <span id="total-global-kilos" class="text-2xl font-black text-green-400">0.00 kg</span>
+                    </div>
+                </div>
+                <div class="bg-slate-900/90 p-3 rounded-lg border border-green-500/30 flex justify-between items-center">
+                    <div>
+                        <span class="text-xs text-slate-400 block">Valorización Total</span>
+                        <span id="total-global-costo" class="text-2xl font-black text-emerald-400">$0</span>
+                    </div>
+                    <i data-lucide="dollar-sign" class="w-8 h-8 text-emerald-500 opacity-60"></i>
+                </div>
+            </div>
+
+            <!-- Tabla Resumen por Corte -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-bold text-slate-200">Detalle de Costos por Corte</h3>
+                    <span class="text-xs text-slate-400">Pesables Vacuno</span>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-700 text-xs text-slate-400 uppercase">
+                                <th class="py-2 px-1">Corte</th>
+                                <th class="py-2 px-1 text-center">Cajas</th>
+                                <th class="py-2 px-1 text-right">Kilos</th>
+                                <th class="py-2 px-1 text-right">$/Kg</th>
+                                <th class="py-2 px-1 text-right">Subtotal</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-cuerpos-resumen" class="divide-y divide-slate-700/50">
+                            <!-- Filas generadas dinámicamente por JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Botones de Acción / Exportación -->
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="exportarExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 text-sm shadow-md transition">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Exportar Excel
+                </button>
+                <button onclick="imprimirOpdf()" class="bg-slate-700 hover:bg-slate-600 text-slate-100 py-3 rounded-lg font-bold flex items-center justify-center gap-2 text-sm shadow-md transition">
+                    <i data-lucide="printer" class="w-4 h-4"></i> Imprimir / PDF
+                </button>
+            </div>
+
+            <button onclick="confirmarBorrarTodo()" class="w-full bg-red-900/40 hover:bg-red-900/70 border border-red-700/60 text-red-300 py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 text-xs transition mt-2">
+                <i data-lucide="trash-2" class="w-4 h-4"></i> Resetear Todo el Inventario
+            </button>
+
+        </div>
+
+    </main>
+
+    <!-- MODAL AGREGAR NUEVO CORTE -->
+    <div id="modal-nuevo-corte" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 w-full max-w-xs shadow-2xl flex flex-col gap-4">
+            <h3 class="font-bold text-lg text-white">Nuevo Corte de Carne</h3>
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Nombre del Corte</label>
+                <input type="text" id="input-nuevo-corte" placeholder="Ej: Tomahawk, Entrecot..." class="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white focus:outline-none focus:border-red-500">
+            </div>
+            <div class="flex gap-2">
+                <button onclick="cerrarModalNuevoCorte()" class="flex-1 bg-slate-700 text-slate-300 py-2 rounded-lg font-medium text-sm">Cancelar</button>
+                <button onclick="guardarNuevoCorte()" class="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold text-sm">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. DATOS PRECARGADOS Y ESTADO INICIAL ---
+        const CORTES_INICIALES = [
+            "Abastero", "Asado Carnicero", "Asado de Tira", "Choclillo", "Cordón de Filete", 
+            "Entraña", "Filete", "Ganso", "Huachalomo", "Lagarto", "Lomo Liso", "Lomo Vetado", 
+            "Malaya", "Plateada", "Posta Negra", "Posta Paleta", "Posta Rosada", "Punta de Ganso", 
+            "Punta Picana", "Sobrecostilla", "Tapabarriga", "Tapapecho"
+        ];
+
+        let inventario = {};
+        let corteSeleccionado = "";
+        let streamCamara = null;
+
+        // --- 2. INICIALIZACIÓN ---
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            cargarDesdeLocalStorage();
+            poblarSelectCortes();
+            actualizarInterfaz();
+        });
+
+        // --- 3. GESTIÓN DE LOCALSTORAGE Y DATOS ---
+        function cargarDesdeLocalStorage() {
+            const dataGuardada = localStorage.getItem('inventario_carne_v2');
+            if (dataGuardada) {
+                try {
+                    inventario = JSON.parse(dataGuardada);
+                } catch (e) {
+                    console.error("Error al leer localStorage", e);
+                    inicializarInventarioBase();
+                }
+            } else {
+                inicializarInventarioBase();
+            }
+        }
+
+        function inicializarInventarioBase() {
+            inventario = {};
+            CORTES_INICIALES.forEach(corte => {
+                inventario[corte] = {
+                    cajas: [],
+                    costoKg: 0
+                };
+            });
+            guardarEnLocalStorage();
+        }
+
+        function guardarEnLocalStorage() {
+            localStorage.setItem('inventario_carne_v2', JSON.stringify(inventario));
+        }
+
+        // --- 4. CONTROL DE PESTAÑAS Y CORTE ACTIVO ---
+        function cambiarPestana(pestana) {
+            const viewEscaner = document.getElementById('view-escaner');
+            const viewResumen = document.getElementById('view-resumen');
+            const navEscaner = document.getElementById('nav-escaner');
+            const navResumen = document.getElementById('nav-resumen');
+
+            if (pestana === 'escaner') {
+                viewEscaner.classList.remove('hidden');
+                viewResumen.classList.add('hidden');
+
+                navEscaner.className = "flex-1 py-2.5 border-b-2 border-red-500 text-red-400 font-bold flex items-center justify-center gap-2";
+                navResumen.className = "flex-1 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center justify-center gap-2";
+            } else {
+                viewEscaner.classList.add('hidden');
+                viewResumen.classList.remove('hidden');
+
+                navResumen.className = "flex-1 py-2.5 border-b-2 border-red-500 text-red-400 font-bold flex items-center justify-center gap-2";
+                navEscaner.className = "flex-1 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center justify-center gap-2";
+                
+                detenerCamara();
+                renderizarResumen();
+            }
+        }
+
+        function poblarSelectCortes() {
+            const select = document.getElementById('select-corte');
+            select.innerHTML = '';
+            
+            const nombresCortes = Object.keys(inventario).sort();
+            nombresCortes.forEach(nombre => {
+                const opt = document.createElement('option');
+                opt.value = nombre;
+                opt.textContent = nombre;
+                select.appendChild(opt);
+            });
+
+            if (nombresCortes.length > 0) {
+                if (!corteSeleccionado || !inventario[corteSeleccionado]) {
+                    corteSeleccionado = nombresCortes[0];
+                }
+                select.value = corteSeleccionado;
+            }
+        }
+
+        function actualizarCorteActivo() {
+            const select = document.getElementById('select-corte');
+            corteSeleccionado = select.value;
+            actualizarInterfaz();
+        }
+
+        function abrirModalNuevoCorte() {
+            document.getElementById('modal-nuevo-corte').classList.remove('hidden');
+            document.getElementById('input-nuevo-corte').focus();
+        }
+
+        function cerrarModalNuevoCorte() {
+            document.getElementById('modal-nuevo-corte').classList.add('hidden');
+            document.getElementById('input-nuevo-corte').value = '';
+        }
+
+        function guardarNuevoCorte() {
+            const input = document.getElementById('input-nuevo-corte');
+            const nombre = input.value.trim();
+            if (nombre) {
+                if (!inventario[nombre]) {
+                    inventario[nombre] = { cajas: [], costoKg: 0 };
+                    guardarEnLocalStorage();
+                    poblarSelectCortes();
+                    corteSeleccionado = nombre;
+                    document.getElementById('select-corte').value = nombre;
+                    actualizarInterfaz();
+                }
+            }
+            cerrarModalNuevoCorte();
+        }
+
+        // --- 5. REGISTRO Y EDICIÓN DE CAJAS ---
+        function agregarCaja(kilos) {
+            if (isNaN(kilos) || kilos <= 0) {
+                alert("Por favor ingrese un peso válido en kilos.");
+                return;
+            }
+
+            if (!inventario[corteSeleccionado]) {
+                inventario[corteSeleccionado] = { cajas: [], costoKg: 0 };
+            }
+
+            const nuevaCaja = {
+                id: Date.now(),
+                kilos: parseFloat(kilos.toFixed(3)),
+                hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+
+            inventario[corteSeleccionado].cajas.unshift(nuevaCaja);
+            guardarEnLocalStorage();
+            
+            reproducirPitido();
+            actualizarInterfaz();
+            limpiarInput();
+        }
+
+        function agregarCajaDesdeInput() {
+            const input = document.getElementById('input-kilos');
+            const kilos = parseFloat(input.value);
+            agregarCaja(kilos);
+        }
+
+        function eliminarCaja(idCaja) {
+            if (inventario[corteSeleccionado]) {
+                inventario[corteSeleccionado].cajas = inventario[corteSeleccionado].cajas.filter(c => c.id !== idCaja);
+                guardarEnLocalStorage();
+                actualizarInterfaz();
+            }
+        }
+
+        function vaciarCajasDeCorteActivo() {
+            if (confirm(`¿Deseas borrar todas las cajas registradas para ${corteSeleccionado}?`)) {
+                if (inventario[corteSeleccionado]) {
+                    inventario[corteSeleccionado].cajas = [];
+                    guardarEnLocalStorage();
+                    actualizarInterfaz();
+                }
+            }
+        }
+
+        function ajustarInput(valor) {
+            const input = document.getElementById('input-kilos');
+            const actual = parseFloat(input.value) || 0;
+            input.value = (actual + valor).toFixed(3);
+        }
+
+        function limpiarInput() {
+            document.getElementById('input-kilos').value = '';
+        }
+
+        // Feedback de Audio con sintesis Web Audio API
+        function reproducirPitido() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.value = 880; // Tono agudo de confirmación
+                gain.gain.value = 0.15;
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.12);
+            } catch (e) {
+                // Audio Context no soportado o bloqueado
+            }
+        }
+
+        // --- 6. ESCÁNER OCR POR CÁMARA ---
+        async function toggleCamara() {
+            const contenedor = document.getElementById('contenedor-visor');
+            const btnCapturar = document.getElementById('btn-capturar-ocr');
+            const textBtn = document.getElementById('text-btn-camara');
+
+            if (streamCamara) {
+                detenerCamara();
+                contenedor.classList.add('hidden');
+                btnCapturar.classList.add('hidden');
+                textBtn.textContent = 'Iniciar Cámara';
+            } else {
+                try {
+                    streamCamara = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+                    });
+                    const video = document.getElementById('video-stream');
+                    video.srcObject = streamCamara;
+                    await video.play();
+
+                    contenedor.classList.remove('hidden');
+                    btnCapturar.classList.remove('hidden');
+                    textBtn.textContent = 'Detener Cámara';
+                } catch (err) {
+                    alert('No se pudo acceder a la cámara. Asegúrate de dar los permisos correspondientes.');
+                    console.error("Error de cámara:", err);
+                }
+            }
+        }
+
+        function detenerCamara() {
+            if (streamCamara) {
+                streamCamara.getTracks().forEach(track => track.stop());
+                streamCamara = null;
+            }
+        }
+
+        async function capturarYAnalizarEtiqueta() {
+            const video = document.getElementById('video-stream');
+            const canvas = document.getElementById('canvas-ocr');
+            const loader = document.getElementById('ocr-loader');
+
+            if (!video.srcObject) return;
+
+            // Dibujar frame en el canvas
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            loader.classList.remove('hidden');
+
+            try {
+                // Procesar con Tesseract OCR
+                const result = await Tesseract.recognize(canvas, 'eng', {
+                    tessedit_char_whitelist: '0123456789.,'
+                });
+
+                const textoLeido = result.data.text;
+                console.log("Texto detectado:", textoLeido);
+
+                // Buscar patrones de números que coincidan con pesos habituales de cajas (ej. 12.450, 18,30, 24.5)
+                const coincidencias = textoLeido.match(/\b\d{1,2}[.,]\d{1,3}\b/g);
+
+                if (coincidencias && coincidencias.length > 0) {
+                    // Tomamos la primera coincidencia limpia
+                    let valorFormateado = coincidencias[0].replace(',', '.');
+                    let kilos = parseFloat(valorFormateado);
+
+                    if (kilos > 0 && kilos < 100) { // Rango lógico de peso de caja
+                        document.getElementById('input-kilos').value = kilos.toFixed(3);
+                        reproducirPitido();
+                    } else {
+                        alert(`Se detectó el texto: "${coincidencias[0]}", pero no parece un peso de caja válido (1 a 99 kg).`);
+                    }
+                } else {
+                    alert('No se pudo identificar con claridad un número de peso en la etiqueta. Intenta acercar la cámara o ingresar manualmente.');
+                }
+            } catch (err) {
+                console.error("Error OCR:", err);
+                alert("Error al procesar la imagen de la etiqueta.");
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+
+        // --- 7. ACTUALIZACIÓN DE INTERFAZ Y TABLAS ---
+        function actualizarInterfaz() {
+            // Actualizar selector y titulos
+            document.getElementById('corte-activo-titulo').textContent = corteSeleccionado || '-';
+
+            const datosCorte = inventario[corteSeleccionado] || { cajas: [], costoKg: 0 };
+            const totalKilos = datosCorte.cajas.reduce((sum, c) => sum + c.kilos, 0);
+
+            document.getElementById('corte-activo-kilos').textContent = `${totalKilos.toFixed(3)} kg`;
+            document.getElementById('corte-activo-cajas').textContent = `${datosCorte.cajas.length} Cajas registrad.`;
+
+            // Lista de cajas de este corte
+            const contenedorLista = document.getElementById('lista-cajas-corte');
+            contenedorLista.innerHTML = '';
+
+            if (datosCorte.cajas.length === 0) {
+                contenedorLista.innerHTML = '<p class="text-xs text-slate-500 text-center py-3">No hay cajas ingresadas para este corte.</p>';
+            } else {
+                datosCorte.cajas.forEach((caja, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'flex items-center justify-between bg-slate-900 px-3 py-2 rounded-lg border border-slate-700/60';
+                    item.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-slate-500 font-mono">#${datosCorte.cajas.length - index}</span>
+                            <span class="font-bold text-white">${caja.kilos.toFixed(3)} kg</span>
+                            <span class="text-[10px] text-slate-400">(${caja.hora})</span>
+                        </div>
+                        <button onclick="eliminarCaja(${caja.id})" class="text-slate-500 hover:text-red-400 p-1">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    `;
+                    contenedorLista.appendChild(item);
+                });
+            }
+
+            // Actualizar Badge global
+            let cajasGlobales = 0;
+            Object.values(inventario).forEach(c => cajasGlobales += c.cajas.length);
+            document.getElementById('badge-total-cajas').textContent = cajasGlobales;
+
+            lucide.createIcons();
+        }
+
+        function renderizarResumen() {
+            const tbody = document.getElementById('tabla-cuerpos-resumen');
+            tbody.innerHTML = '';
+
+            let totalCajasGlobal = 0;
+            let totalKilosGlobal = 0;
+            let totalCostoGlobal = 0;
+
+            const cortesOrdenados = Object.keys(inventario).sort();
+
+            cortesOrdenados.forEach(corte => {
+                const data = inventario[corte];
+                const cajas = data.cajas.length;
+                const kilos = data.cajas.reduce((sum, c) => sum + c.kilos, 0);
+                const costoKg = data.costoKg || 0;
+                const subtotal = kilos * costoKg;
+
+                totalCajasGlobal += cajas;
+                totalKilosGlobal += kilos;
+                totalCostoGlobal += subtotal;
+
+                if (cajas > 0 || costoKg > 0) {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-700/30";
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-1 font-semibold text-slate-200">${corte}</td>
+                        <td class="py-2.5 px-1 text-center font-mono">${cajas}</td>
+                        <td class="py-2.5 px-1 text-right font-bold text-green-400">${kilos.toFixed(2)}</td>
+                        <td class="py-2.5 px-1 text-right">
+                            <input type="number" value="${costoKg || ''}" placeholder="$0" 
+                                onchange="actualizarCostoKg('${corte}', this.value)"
+                                class="w-16 bg-slate-900 border border-slate-600 rounded px-1.5 py-1 text-right font-mono text-xs text-amber-300 focus:outline-none focus:border-red-500">
+                        </td>
+                        <td class="py-2.5 px-1 text-right font-mono font-bold text-slate-100">$${Math.round(subtotal).toLocaleString('es-CL')}</td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            });
+
+            document.getElementById('total-global-cajas').textContent = totalCajasGlobal;
+            document.getElementById('total-global-kilos').textContent = `${totalKilosGlobal.toFixed(2)} kg`;
+            document.getElementById('total-global-costo').textContent = `$${Math.round(totalCostoGlobal).toLocaleString('es-CL')}`;
+        }
+
+        function actualizarCostoKg(corte, valor) {
+            const costo = parseFloat(valor) || 0;
+            if (inventario[corte]) {
+                inventario[corte].costoKg = costo;
+                guardarEnLocalStorage();
+                renderizarResumen();
+            }
+        }
+
+        // --- 8. EXPORTACIÓN DE REPORTES ---
+        function exportarExcel() {
+            const dataExcel = [];
+
+            Object.keys(inventario).sort().forEach(corte => {
+                const item = inventario[corte];
+                const kilos = item.cajas.reduce((sum, c) => sum + c.kilos, 0);
+                if (item.cajas.length > 0) {
+                    dataExcel.push({
+                        "Corte de Carne": corte,
+                        "N° Cajas": item.cajas.length,
+                        "Kilos Netos (KG)": parseFloat(kilos.toFixed(3)),
+                        "Costo por Kg ($)": item.costoKg || 0,
+                        "Costo Total ($)": Math.round(kilos * (item.costoKg || 0))
+                    });
+                }
+            });
+
+            if (dataExcel.length === 0) {
+                alert("No hay datos cargados para exportar.");
+                return;
+            }
+
+            const worksheet = XLSX.utils.json_to_sheet(dataExcel);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario Carne");
+            
+            XLSX.writeFile(workbook, `Inventario_Carne_Vacuno_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function imprimirOpdf() {
+            window.print();
+        }
+
+        function confirmarBorrarTodo() {
+            if (confirm("¿ATENCIÓN: Estás seguro de que deseas reiniciar todo el inventario? Se borrarán todas las cajas y costos cargados.")) {
+                inicializarInventarioBase();
+                poblarSelectCortes();
+                actualizarInterfaz();
+                renderizarResumen();
+                alert("Inventario reseteado correctamente.");
+            }
+        }
+    </script>
+</body>
+</html>
