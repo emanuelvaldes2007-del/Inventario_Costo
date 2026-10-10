@@ -82,14 +82,26 @@
         <!-- SECCIÓN 1: ESCÁNER / INGRESO DE PESO -->
         <div id="view-escaner" class="flex flex-col gap-4">
 
-            <!-- Selector de Corte de Carne Active -->
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-3 shadow-lg">
-                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>Corte Seleccionado (Vacuno)</span>
+            <!-- Selector de Corte de Carne Active con Buscador -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-3 shadow-lg flex flex-col gap-2.5">
+                <div class="flex items-center justify-between">
+                    <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Corte Seleccionado (Vacuno)
+                    </label>
                     <button onclick="abrirModalNuevoCorte()" class="text-red-400 hover:text-red-300 text-xs flex items-center gap-1 font-normal">
                         <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Agregar Otro
                     </button>
-                </label>
+                </div>
+
+                <!-- Campo de búsqueda de corte -->
+                <div class="relative">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                    <input type="text" id="input-buscar-corte" oninput="filtrarCortes()" onkeydown="manejarTeclaBuscador(event)" placeholder="Buscar corte (ej: Lomo, Posta...)" class="w-full bg-slate-900 border border-slate-600 focus:border-red-500 rounded-lg pl-9 pr-8 py-2 text-sm text-slate-100 focus:outline-none">
+                    <button id="btn-limpiar-busqueda" onclick="limpiarBuscadorCorte()" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white hidden">
+                        <i data-lucide="x-circle" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
                 <div class="flex gap-2">
                     <select id="select-corte" onchange="actualizarCorteActivo()" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-lg font-bold text-slate-100 focus:outline-none focus:border-red-500">
                         <!-- Opciones cargadas por JS -->
@@ -341,30 +353,80 @@
             }
         }
 
-        function poblarSelectCortes() {
+        function poblarSelectCortes(filtro = '') {
             const select = document.getElementById('select-corte');
             select.innerHTML = '';
             
+            const termino = filtro.toLowerCase().trim();
             const nombresCortes = Object.keys(inventario).sort();
-            nombresCortes.forEach(nombre => {
+
+            const cortesFiltrados = nombresCortes.filter(nombre => 
+                nombre.toLowerCase().includes(termino)
+            );
+
+            if (cortesFiltrados.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No se encontraron cortes';
+                select.appendChild(opt);
+                return;
+            }
+
+            cortesFiltrados.forEach(nombre => {
                 const opt = document.createElement('option');
                 opt.value = nombre;
                 opt.textContent = nombre;
                 select.appendChild(opt);
             });
 
-            if (nombresCortes.length > 0) {
-                if (!corteSeleccionado || !inventario[corteSeleccionado]) {
-                    corteSeleccionado = nombresCortes[0];
-                }
+            // Si el corte actualmente seleccionado sigue estando en los filtrados, se mantiene
+            if (cortesFiltrados.includes(corteSeleccionado)) {
                 select.value = corteSeleccionado;
+            } else {
+                corteSeleccionado = cortesFiltrados[0];
+                select.value = corteSeleccionado;
+                actualizarCorteActivo();
+            }
+        }
+
+        function filtrarCortes() {
+            const inputBusqueda = document.getElementById('input-buscar-corte');
+            const btnLimpiar = document.getElementById('btn-limpiar-busqueda');
+            const texto = inputBusqueda.value;
+
+            if (texto.trim() !== '') {
+                btnLimpiar.classList.remove('hidden');
+            } else {
+                btnLimpiar.classList.add('hidden');
+            }
+
+            poblarSelectCortes(texto);
+        }
+
+        function limpiarBuscadorCorte() {
+            const inputBusqueda = document.getElementById('input-buscar-corte');
+            inputBusqueda.value = '';
+            filtrarCortes();
+            inputBusqueda.focus();
+        }
+
+        function manejarTeclaBuscador(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                const select = document.getElementById('select-corte');
+                if (select.value) {
+                    actualizarCorteActivo();
+                    document.getElementById('input-kilos').focus();
+                }
             }
         }
 
         function actualizarCorteActivo() {
             const select = document.getElementById('select-corte');
-            corteSeleccionado = select.value;
-            actualizarInterfaz();
+            if (select.value) {
+                corteSeleccionado = select.value;
+                actualizarInterfaz();
+            }
         }
 
         function abrirModalNuevoCorte() {
@@ -384,7 +446,7 @@
                 if (!inventario[nombre]) {
                     inventario[nombre] = { cajas: [], costoKg: 0 };
                     guardarEnLocalStorage();
-                    poblarSelectCortes();
+                    limpiarBuscadorCorte();
                     corteSeleccionado = nombre;
                     document.getElementById('select-corte').value = nombre;
                     actualizarInterfaz();
